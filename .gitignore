@@ -1,0 +1,59 @@
+# Environment variables (contains sensitive data)
+.env
+.env.*
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Python distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+
+# Logs
+*.log
+logs/
+
+# Database files (historical data, not needed in repo)
+database/
+*.xlsx
+
+# Backup files
+*.bak
+*.backup
+*_old.py
+*_fixed.py
+*_noai.py
+
+# Docker volumes (local only)
+docker-volumes/

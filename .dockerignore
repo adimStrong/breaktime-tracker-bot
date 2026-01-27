@@ -1,0 +1,52 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git files
+.git/
+.gitignore
+
+# Old versions and backups
+*_old.py
+*_fixed.py
+*_noai.py
+*.bak
+*.backup
+
+# Log files
+*.log
+
+# Environment files (will be provided at runtime)
+.env
+.env.*
+
+# Documentation (not needed in container)
+*.md
+BOT_SETUP_INSTRUCTIONS.md
+
+# Docker files (not needed in image)
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Legacy files
+break_time_log.xlsx
