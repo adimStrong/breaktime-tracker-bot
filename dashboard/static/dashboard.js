@@ -3,7 +3,8 @@
  */
 
 const API_BASE = window.location.origin;
-const REFRESH_INTERVAL = 30000; // 30 seconds
+const REFRESH_INTERVAL = 5000; // 5 seconds for realtime sync
+const REALTIME_INTERVAL = 3000; // 3 seconds for quick metrics
 
 // Chart instances
 let distributionChart = null;
@@ -13,6 +14,7 @@ let hourlyChart = null;
 // State
 let dashboardData = null;
 let agentData = [];
+let previousBreakCount = 0;
 
 // ============================================
 // INITIALIZATION
@@ -22,8 +24,11 @@ document.addEventListener('DOMContentLoaded', () => {
     initCharts();
     loadDashboard();
 
-    // Auto-refresh every 30 seconds
+    // Full dashboard refresh every 5 seconds
     setInterval(loadDashboard, REFRESH_INTERVAL);
+
+    // Quick realtime metrics every 3 seconds
+    setInterval(loadRealtimeMetrics, REALTIME_INTERVAL);
 
     // Search functionality
     document.getElementById('agentSearch').addEventListener('input', filterAgents);
@@ -53,12 +58,48 @@ async function loadDashboard() {
     updateConnectionStatus(true);
     updateLastRefresh();
 
+    // Check for new data
+    const currentBreakCount = data.realtime?.completed_breaks_today || 0;
+    if (previousBreakCount > 0 && currentBreakCount > previousBreakCount) {
+        flashUpdate();
+    }
+    previousBreakCount = currentBreakCount;
+
     // Update all components
     updateStats(data.realtime, data.break_distribution);
     updateDistributionChart(data.break_distribution);
     updateTrendChart(data.compliance_trend);
     updateAgentTable(data.agent_performance);
     updateHourlyChart(data.hourly_distribution);
+}
+
+async function loadRealtimeMetrics() {
+    const data = await fetchAPI('/api/realtime');
+    if (!data) return;
+
+    // Quick update of key metrics only
+    const currentBreakCount = data.completed_breaks_today || 0;
+    if (previousBreakCount > 0 && currentBreakCount > previousBreakCount) {
+        flashUpdate();
+        previousBreakCount = currentBreakCount;
+        // Trigger full refresh when new data detected
+        loadDashboard();
+    }
+
+    // Update connection status and time
+    updateConnectionStatus(true);
+    updateLastRefresh();
+}
+
+function flashUpdate() {
+    // Visual feedback for new data
+    const cards = document.querySelectorAll('.stat-card');
+    cards.forEach(card => {
+        card.classList.add('ring-2', 'ring-green-400', 'ring-opacity-75');
+        setTimeout(() => {
+            card.classList.remove('ring-2', 'ring-green-400', 'ring-opacity-75');
+        }, 1000);
+    });
 }
 
 // ============================================
