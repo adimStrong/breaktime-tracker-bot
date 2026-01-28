@@ -46,7 +46,10 @@ logs/
 
 # Database files (historical data, not needed in repo)
 database/
-*.xlsx
+
+# Allow seed_data for Railway volume initialization
+!seed_data/
+!seed_data/**
 
 # Backup files
 *.bak

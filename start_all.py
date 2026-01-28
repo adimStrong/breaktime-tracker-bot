@@ -31,6 +31,10 @@ def run_dashboard():
 
 
 if __name__ == "__main__":
+    # Sync seed data to volume on first run
+    from sync_seed_data import sync_seed_data
+    sync_seed_data()
+
     mode = os.getenv("RUN_MODE", "both").lower()
 
     if mode == "bot":
