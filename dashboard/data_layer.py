@@ -5,13 +5,20 @@ Reads data from Excel files stored in database/YYYY-MM/break_logs_YYYY-MM-DD.xls
 
 import os
 import pandas as pd
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import Dict, List, Optional
 from dataclasses import dataclass, asdict
 
 # Configuration
 BASE_DIR = os.getenv('BASE_DIR', os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATABASE_DIR = os.path.join(BASE_DIR, "database")
+
+# Philippine Timezone (UTC+8)
+PH_TIMEZONE = timezone(timedelta(hours=8))
+
+def get_ph_now():
+    """Get current datetime in Philippine timezone."""
+    return datetime.now(PH_TIMEZONE)
 
 
 # ============================================
@@ -144,7 +151,7 @@ def get_realtime_metrics() -> RealtimeMetrics:
     df = load_daily_data()
 
     if df.empty:
-        return RealtimeMetrics(timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        return RealtimeMetrics(timestamp=get_ph_now().strftime('%Y-%m-%d %H:%M:%S'))
 
     # Completed breaks (BACK actions)
     completed = len(df[df['Action'] == 'BACK'])
@@ -163,7 +170,7 @@ def get_realtime_metrics() -> RealtimeMetrics:
         agents_active_today=agents,
         total_break_time_today=round(float(total_time) if pd.notna(total_time) else 0, 1),
         compliance_rate=100.0,
-        timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        timestamp=get_ph_now().strftime('%Y-%m-%d %H:%M:%S')
     )
 
 
@@ -321,7 +328,7 @@ def get_active_breaks() -> List[ActiveBreak]:
             del active[user_id]
 
     # Calculate duration for active breaks
-    now = datetime.now()
+    now = get_ph_now()
     results = []
     for data in active.values():
         try:
@@ -385,7 +392,7 @@ def get_full_dashboard_data() -> Dict:
         'agent_performance': [asdict(a) for a in get_agent_performance_today()],
         'hourly_distribution': [asdict(h) for h in get_hourly_distribution_today()],
         'compliance_trend': [asdict(t) for t in get_compliance_trend(7)],
-        'generated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        'generated_at': get_ph_now().strftime('%Y-%m-%d %H:%M:%S')
     }
 
 

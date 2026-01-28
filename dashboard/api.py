@@ -5,7 +5,14 @@ FastAPI backend serving dashboard data from Excel files.
 
 import os
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
+
+# Philippine Timezone (UTC+8)
+PH_TIMEZONE = timezone(timedelta(hours=8))
+
+def get_ph_now():
+    """Get current datetime in Philippine timezone."""
+    return datetime.now(PH_TIMEZONE)
 from typing import Optional
 from dataclasses import asdict
 
@@ -92,7 +99,7 @@ async def health_check():
     """Health check endpoint."""
     return {
         "status": "ok",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": get_ph_now().isoformat()
     }
 
 
@@ -128,7 +135,7 @@ async def get_active():
         return {
             "count": len(active),
             "active_breaks": [asdict(a) for a in active],
-            "timestamp": datetime.now().isoformat()
+            "timestamp": get_ph_now().isoformat()
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
