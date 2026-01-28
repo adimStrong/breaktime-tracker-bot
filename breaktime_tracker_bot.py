@@ -5,9 +5,16 @@ Production-ready with daily database archiving and Excel Online sync
 """
 import os
 import pandas as pd
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta, time, timezone
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler
+
+# Philippine Timezone (UTC+8)
+PH_TIMEZONE = timezone(timedelta(hours=8))
+
+def get_ph_now():
+    """Get current datetime in Philippine timezone."""
+    return datetime.now(PH_TIMEZONE)
 
 # Microsoft Excel Online sync (optional)
 try:
@@ -38,8 +45,8 @@ waiting_for_reason_users = {}
 
 def get_daily_log_file():
     """Get the log file path for today's date."""
-    today = datetime.now().strftime('%Y-%m-%d')
-    year_month = datetime.now().strftime('%Y-%m')
+    today = get_ph_now().strftime('%Y-%m-%d')
+    year_month = get_ph_now().strftime('%Y-%m')
 
     # Create directory structure: database/YYYY-MM/
     month_dir = os.path.join(DATABASE_DIR, year_month)
@@ -155,7 +162,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = user.username or 'N/A'
     full_name = f"{user.first_name} {user.last_name or ''}".strip()
     action_code = query.data
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    timestamp = get_ph_now().strftime('%Y-%m-%d %H:%M:%S')
 
     # Store group chat ID if message is from a group
     group_chat_id = None
@@ -319,7 +326,7 @@ Don't forget to clock back in when you return!""",
 
 async def show_summary(query, user_id, username, full_name):
     """Show user's break summary for today"""
-    today = datetime.now().strftime('%Y-%m-%d')
+    today = get_ph_now().strftime('%Y-%m-%d')
     log_file = get_daily_log_file()
 
     if not os.path.exists(log_file):
@@ -422,7 +429,7 @@ async def handle_break_command(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = user.id
     username = user.username or 'N/A'
     full_name = f"{user.first_name} {user.last_name or ''}".strip()
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    timestamp = get_ph_now().strftime('%Y-%m-%d %H:%M:%S')
     keyboard = get_keyboard(user_id)
 
     # Get group chat ID if message is from a group
@@ -549,7 +556,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def check_break_reminders(context: ContextTypes.DEFAULT_TYPE):
     """Periodically check for long-running breaks and send reminders."""
-    now = datetime.now()
+    now = get_ph_now()
     for user_id, session in user_sessions.items():
         if session.get('active') and not session.get('reminder_sent'):
             break_type = session.get('break_type')
@@ -586,13 +593,13 @@ You have been on your '{break_type}' break for {int(duration_minutes)} minutes (
 
 async def run_end_of_day_reports(context: ContextTypes.DEFAULT_TYPE):
     """Run daily reports for 'no back' breaks and individual summaries."""
-    yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+    yesterday = (get_ph_now() - timedelta(days=1)).strftime('%Y-%m-%d')
     print(f"\n{'='*50}")
     print(f"Running end-of-day reports for {yesterday}...")
     print(f"{'='*50}")
 
     # Get yesterday's log file
-    year_month = (datetime.now() - timedelta(days=1)).strftime('%Y-%m')
+    year_month = (get_ph_now() - timedelta(days=1)).strftime('%Y-%m')
     month_dir = os.path.join(DATABASE_DIR, year_month)
     log_file = os.path.join(month_dir, f"break_logs_{yesterday}.xlsx")
 
