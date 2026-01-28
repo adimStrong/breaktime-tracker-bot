@@ -26,12 +26,8 @@ def convert_to_ph_time(timestamp_str):
     try:
         # Parse the timestamp
         dt = pd.to_datetime(timestamp_str)
-        # If naive (no timezone), assume it's UTC
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=UTC_TIMEZONE)
-        # Convert to PH time
-        ph_dt = dt.astimezone(PH_TIMEZONE)
-        return ph_dt.strftime('%Y-%m-%d %I:%M:%S %p')
+        # Timestamps are already saved in PH time by the bot, just format them
+        return dt.strftime('%Y-%m-%d %I:%M:%S %p')
     except:
         return timestamp_str
 
@@ -352,9 +348,9 @@ def get_active_breaks() -> List[ActiveBreak]:
     for data in active.values():
         try:
             out_time = pd.to_datetime(data['out_time'])
-            # If naive, assume UTC
+            # Timestamps are saved in PH time by the bot, so treat as PH time
             if out_time.tzinfo is None:
-                out_time = out_time.replace(tzinfo=UTC_TIMEZONE)
+                out_time = out_time.replace(tzinfo=PH_TIMEZONE)
             duration = (now - out_time).total_seconds() / 60
         except:
             duration = 0
