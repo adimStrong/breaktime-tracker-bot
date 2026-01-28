@@ -52,16 +52,18 @@ def sync_seed_data():
         print(f"[SYNC] Database has {len(existing_files)} files (seed: {len(seed_files)}), skipping sync")
         return
 
-    print("[SYNC] Database is empty, copying seed data...")
+    print("[SYNC] Syncing seed data (copying missing files)...")
     copied = 0
-    for item in seed_dir.iterdir():
-        if item.is_dir():
-            dest = db_dir / item.name
-            if not dest.exists():
-                shutil.copytree(item, dest)
-                files_in_dir = len(list(item.rglob('*.xlsx')))
-                copied += files_in_dir
-                print(f"[SYNC] Copied {item.name}/ ({files_in_dir} files)")
+    for seed_file in seed_files:
+        # Get relative path from seed_dir
+        rel_path = seed_file.relative_to(seed_dir)
+        dest_file = db_dir / rel_path
+
+        # Only copy if file doesn't exist
+        if not dest_file.exists():
+            dest_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(seed_file, dest_file)
+            copied += 1
 
     print(f"[SYNC] Seed data sync complete: {copied} files copied")
 
