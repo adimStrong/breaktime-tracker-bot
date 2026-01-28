@@ -30,9 +30,42 @@ def run_dashboard():
     )
 
 
+def sync_seed_data():
+    """Copy seed data to database folder if it's empty."""
+    import shutil
+    from pathlib import Path
+
+    base_dir = os.environ.get('BASE_DIR', os.path.dirname(os.path.abspath(__file__)))
+    seed_dir = Path(base_dir) / 'seed_data'
+    db_dir = Path(base_dir) / 'database'
+
+    if not seed_dir.exists():
+        print("[SYNC] No seed_data folder found, skipping sync")
+        return
+
+    db_dir.mkdir(parents=True, exist_ok=True)
+    existing_files = list(db_dir.rglob('*.xlsx'))
+
+    if len(existing_files) > 0:
+        print(f"[SYNC] Database already has {len(existing_files)} files, skipping seed sync")
+        return
+
+    print("[SYNC] Database is empty, copying seed data...")
+    copied = 0
+    for item in seed_dir.iterdir():
+        if item.is_dir():
+            dest = db_dir / item.name
+            if not dest.exists():
+                shutil.copytree(item, dest)
+                files_in_dir = len(list(item.rglob('*.xlsx')))
+                copied += files_in_dir
+                print(f"[SYNC] Copied {item.name}/ ({files_in_dir} files)")
+
+    print(f"[SYNC] Seed data sync complete: {copied} files copied")
+
+
 if __name__ == "__main__":
     # Sync seed data to volume on first run
-    from sync_seed_data import sync_seed_data
     sync_seed_data()
 
     mode = os.getenv("RUN_MODE", "both").lower()
