@@ -30,6 +30,72 @@ def run_dashboard():
     )
 
 
+def fix_stuck_active_breaks():
+    """One-time fix: Close any stuck active breaks by adding BACK entries."""
+    import pandas as pd
+    from datetime import datetime, timezone, timedelta
+    from pathlib import Path
+
+    PH_TZ = timezone(timedelta(hours=8))
+    now = datetime.now(PH_TZ)
+    today = now.strftime('%Y-%m-%d')
+    year_month = now.strftime('%Y-%m')
+
+    base_dir = os.environ.get('BASE_DIR', os.path.dirname(os.path.abspath(__file__)))
+    log_file = Path(base_dir) / 'database' / year_month / f'break_logs_{today}.xlsx'
+
+    if not log_file.exists():
+        print(f"[FIX] No file for today ({today}), skipping fix")
+        return
+
+    try:
+        df = pd.read_excel(log_file, engine='openpyxl')
+        if df.empty:
+            return
+
+        # Find active breaks (OUT without BACK)
+        active = {}
+        df_sorted = df.sort_values('Timestamp')
+        for _, row in df_sorted.iterrows():
+            user_id = int(row['User ID'])
+            action = row['Action']
+            if action == 'OUT':
+                active[user_id] = row
+            elif action == 'BACK' and user_id in active:
+                del active[user_id]
+
+        if not active:
+            print("[FIX] No stuck active breaks found")
+            return
+
+        print(f"[FIX] Found {len(active)} stuck active breaks, adding BACK entries...")
+
+        # Add BACK entries for stuck breaks
+        timestamp = now.strftime('%Y-%m-%d %H:%M:%S')
+        new_rows = []
+        for user_id, row in active.items():
+            new_rows.append({
+                'User ID': user_id,
+                'Username': row['Username'],
+                'Full Name': row['Full Name'],
+                'Break Type': row['Break Type'],
+                'Action': 'BACK',
+                'Timestamp': timestamp,
+                'Duration (minutes)': 0,
+                'Reason': 'Auto-closed by system'
+            })
+            print(f"[FIX] Closing break for {row['Full Name']}")
+
+        # Append and save
+        new_df = pd.DataFrame(new_rows)
+        df = pd.concat([df, new_df], ignore_index=True)
+        df.to_excel(log_file, index=False, engine='openpyxl')
+        print(f"[FIX] Fixed {len(new_rows)} stuck breaks")
+
+    except Exception as e:
+        print(f"[FIX] Error fixing breaks: {e}")
+
+
 def sync_seed_data():
     """Copy seed data to database folder if it's empty."""
     import shutil
@@ -65,6 +131,9 @@ def sync_seed_data():
 if __name__ == "__main__":
     # Sync seed data to volume on first run
     sync_seed_data()
+
+    # Fix any stuck active breaks (one-time cleanup)
+    fix_stuck_active_breaks()
 
     mode = os.getenv("RUN_MODE", "both").lower()
 
