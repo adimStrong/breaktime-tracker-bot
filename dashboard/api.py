@@ -29,6 +29,7 @@ from dashboard.data_layer import (
     get_compliance_trend,
     get_full_dashboard_data,
     get_break_logs,
+    get_active_breaks,
     load_data_for_period,
 )
 
@@ -115,6 +116,20 @@ async def get_realtime():
     try:
         metrics = get_realtime_metrics()
         return metrics.to_dict()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/active-breaks", tags=["Dashboard"])
+async def get_active():
+    """Get list of agents currently on break (OUT without BACK)."""
+    try:
+        active = get_active_breaks()
+        return {
+            "count": len(active),
+            "active_breaks": [asdict(a) for a in active],
+            "timestamp": datetime.now().isoformat()
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

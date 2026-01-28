@@ -14,6 +14,7 @@ let hourlyChart = null;
 // State
 let dashboardData = null;
 let agentData = [];
+let activeBreaksData = [];
 let previousBreakCount = 0;
 
 // ============================================
@@ -67,6 +68,7 @@ async function loadDashboard() {
 
     // Update all components
     updateStats(data.realtime, data.break_distribution);
+    updateActiveBreaks(data.active_breaks);
     updateDistributionChart(data.break_distribution);
     updateTrendChart(data.compliance_trend);
     updateAgentTable(data.agent_performance);
@@ -129,6 +131,65 @@ function updateStats(realtime, distribution) {
     document.getElementById('smokeDuration').textContent = formatDuration(smoke.duration) + ' total';
 }
 
+function updateActiveBreaks(activeBreaks) {
+    const panel = document.getElementById('activeBreaksPanel');
+    const countBadge = document.getElementById('activeCount');
+    const list = document.getElementById('activeBreaksList');
+
+    // Store active breaks for agent table reference
+    activeBreaksData = activeBreaks || [];
+
+    if (!activeBreaks || activeBreaks.length === 0) {
+        panel.classList.add('hidden');
+        return;
+    }
+
+    // Show panel and update count
+    panel.classList.remove('hidden');
+    countBadge.textContent = activeBreaks.length;
+
+    // Render active break cards
+    list.innerHTML = activeBreaks.map(b => {
+        const breakIcon = getBreakIcon(b.break_type);
+        const durationClass = b.duration_minutes > 30 ? 'text-red-500' :
+                              b.duration_minutes > 15 ? 'text-amber-500' : 'text-green-500';
+
+        return `
+            <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center gap-3">
+                <div class="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
+                    <i class="${breakIcon} text-amber-600"></i>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <p class="font-medium text-gray-800 truncate">${b.full_name}</p>
+                    <p class="text-sm text-gray-500">${b.break_type}</p>
+                </div>
+                <div class="text-right">
+                    <p class="font-bold ${durationClass}">${b.duration_minutes.toFixed(0)}m</p>
+                    <p class="text-xs text-gray-400">since ${formatTime(b.out_time)}</p>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function getBreakIcon(breakType) {
+    const type = breakType.toLowerCase();
+    if (type.includes('eating') || type.includes('lunch')) return 'fas fa-utensils';
+    if (type.includes('smoke')) return 'fas fa-smoking';
+    if (type.includes('comfort') || type.includes('cr')) return 'fas fa-restroom';
+    if (type.includes('personal')) return 'fas fa-user';
+    return 'fas fa-clock';
+}
+
+function formatTime(timestamp) {
+    try {
+        const date = new Date(timestamp);
+        return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+    } catch {
+        return timestamp;
+    }
+}
+
 function updateAgentTable(agents) {
     agentData = agents;
     renderAgentTable(agents);
@@ -143,6 +204,12 @@ function renderAgentTable(agents) {
     }
 
     tbody.innerHTML = agents.map(a => {
+        // Check if agent is currently on break
+        const onBreak = activeBreaksData.find(b => b.user_id === a.user_id);
+        const statusDot = onBreak ? 'status-on_break' : 'status-available';
+        const statusText = onBreak ? `On Break (${onBreak.break_type})` : 'Available';
+        const statusColor = onBreak ? 'text-amber-600' : 'text-gray-600';
+
         return `
             <tr class="table-row">
                 <td class="px-4 py-3">
@@ -155,8 +222,8 @@ function renderAgentTable(agents) {
                 </td>
                 <td class="px-4 py-3 text-center">
                     <div class="flex items-center justify-center gap-2">
-                        <span class="status-dot status-available"></span>
-                        <span class="text-sm text-gray-600">Available</span>
+                        <span class="status-dot ${statusDot}"></span>
+                        <span class="text-sm ${statusColor}">${statusText}</span>
                     </div>
                 </td>
                 <td class="px-4 py-3 text-center">

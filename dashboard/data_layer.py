@@ -70,6 +70,16 @@ class ComplianceTrend:
     agents_count: int
 
 
+@dataclass
+class ActiveBreak:
+    """Currently active break (agent is OUT)."""
+    user_id: int
+    full_name: str
+    break_type: str
+    out_time: str
+    duration_minutes: float
+
+
 # ============================================
 # HELPER FUNCTIONS
 # ============================================
@@ -280,6 +290,58 @@ def get_hourly_distribution_today() -> List[HourlyData]:
     return results
 
 
+def get_active_breaks() -> List[ActiveBreak]:
+    """Get list of agents currently on break (OUT without BACK)."""
+    df = load_daily_data()
+
+    if df.empty:
+        return []
+
+    # Track last action per user
+    active = {}
+
+    # Sort by timestamp to process in order
+    if 'Timestamp' in df.columns:
+        df = df.sort_values('Timestamp')
+
+    for _, row in df.iterrows():
+        user_id = int(row['User ID'])
+        action = row['Action']
+
+        if action == 'OUT':
+            # User went on break
+            active[user_id] = {
+                'user_id': user_id,
+                'full_name': row['Full Name'],
+                'break_type': row['Break Type'],
+                'out_time': row['Timestamp']
+            }
+        elif action == 'BACK' and user_id in active:
+            # User came back
+            del active[user_id]
+
+    # Calculate duration for active breaks
+    now = datetime.now()
+    results = []
+    for data in active.values():
+        try:
+            out_time = pd.to_datetime(data['out_time'])
+            duration = (now - out_time).total_seconds() / 60
+        except:
+            duration = 0
+
+        results.append(ActiveBreak(
+            user_id=data['user_id'],
+            full_name=data['full_name'],
+            break_type=data['break_type'],
+            out_time=data['out_time'],
+            duration_minutes=round(duration, 1)
+        ))
+
+    # Sort by duration descending (longest break first)
+    return sorted(results, key=lambda x: x.duration_minutes, reverse=True)
+
+
 def get_compliance_trend(days: int = 7) -> List[ComplianceTrend]:
     """Get compliance trend over the last N days."""
     end_date = date.today()
@@ -312,8 +374,13 @@ def get_compliance_trend(days: int = 7) -> List[ComplianceTrend]:
 
 def get_full_dashboard_data() -> Dict:
     """Get all data needed for the main dashboard in one call."""
+    active_breaks = get_active_breaks()
+    realtime = get_realtime_metrics()
+    realtime.active_breaks = len(active_breaks)
+
     return {
-        'realtime': get_realtime_metrics().to_dict(),
+        'realtime': realtime.to_dict(),
+        'active_breaks': [asdict(a) for a in active_breaks],
         'break_distribution': [asdict(d) for d in get_break_distribution_today()],
         'agent_performance': [asdict(a) for a in get_agent_performance_today()],
         'hourly_distribution': [asdict(h) for h in get_hourly_distribution_today()],
