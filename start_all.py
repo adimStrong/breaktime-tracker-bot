@@ -45,9 +45,11 @@ def sync_seed_data():
 
     db_dir.mkdir(parents=True, exist_ok=True)
     existing_files = list(db_dir.rglob('*.xlsx'))
+    seed_files = list(seed_dir.rglob('*.xlsx'))
 
-    if len(existing_files) > 0:
-        print(f"[SYNC] Database already has {len(existing_files)} files, skipping seed sync")
+    # Only skip if we have at least 50% of seed data already
+    if len(existing_files) >= len(seed_files) * 0.5:
+        print(f"[SYNC] Database has {len(existing_files)} files (seed: {len(seed_files)}), skipping sync")
         return
 
     print("[SYNC] Database is empty, copying seed data...")
