@@ -13,6 +13,10 @@ PH_TIMEZONE = timezone(timedelta(hours=8))
 def get_ph_now():
     """Get current datetime in Philippine timezone."""
     return datetime.now(PH_TIMEZONE)
+
+def get_ph_date():
+    """Get current date in Philippine timezone."""
+    return get_ph_now().date()
 from typing import Optional
 from dataclasses import asdict
 
@@ -151,7 +155,7 @@ async def get_distribution_today():
     try:
         dist = get_break_distribution_today()
         return {
-            "date": str(date.today()),
+            "date": str(get_ph_date()),
             "distribution": [asdict(d) for d in dist]
         }
     except Exception as e:
@@ -168,7 +172,7 @@ async def get_agents_performance():
     try:
         agents = get_agent_performance_today()
         return {
-            "date": str(date.today()),
+            "date": str(get_ph_date()),
             "count": len(agents),
             "agents": [asdict(a) for a in agents]
         }
@@ -186,7 +190,7 @@ async def get_hourly_today():
     try:
         hourly = get_hourly_distribution_today()
         return {
-            "date": str(date.today()),
+            "date": str(get_ph_date()),
             "hourly": [asdict(h) for h in hourly]
         }
     except Exception as e:

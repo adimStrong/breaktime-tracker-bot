@@ -106,10 +106,14 @@ class ActiveBreak:
 # HELPER FUNCTIONS
 # ============================================
 
+def get_ph_date():
+    """Get current date in Philippine timezone."""
+    return get_ph_now().date()
+
 def get_daily_log_file(target_date: date = None) -> str:
     """Get the log file path for a specific date."""
     if target_date is None:
-        target_date = date.today()
+        target_date = get_ph_date()  # Use PH date instead of server date
 
     year_month = target_date.strftime('%Y-%m')
     day_str = target_date.strftime('%Y-%m-%d')
@@ -369,7 +373,7 @@ def get_active_breaks() -> List[ActiveBreak]:
 
 def get_compliance_trend(days: int = 7) -> List[ComplianceTrend]:
     """Get compliance trend over the last N days."""
-    end_date = date.today()
+    end_date = get_ph_date()
     start_date = end_date - timedelta(days=days-1)
 
     results = []
