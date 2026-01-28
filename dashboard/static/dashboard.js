@@ -184,7 +184,12 @@ function getBreakIcon(breakType) {
 function formatTime(timestamp) {
     try {
         const date = new Date(timestamp);
-        return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        return date.toLocaleTimeString('en-US', {
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true,
+            timeZone: 'Asia/Manila'
+        });
     } catch {
         return timestamp;
     }
@@ -348,8 +353,8 @@ function updateTrendChart(trend) {
     if (!trend || trend.length === 0) return;
 
     const labels = trend.map(t => {
-        const d = new Date(t.date);
-        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const d = new Date(t.date + 'T00:00:00+08:00'); // Parse as PH time
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'Asia/Manila' });
     });
     const data = trend.map(t => t.total_breaks);
 
@@ -389,8 +394,15 @@ function getInitials(name) {
 
 function updateLastRefresh() {
     const now = new Date();
+    const phTime = now.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true,
+        timeZone: 'Asia/Manila'
+    });
     document.getElementById('lastUpdate').innerHTML =
-        `<i class="fas fa-sync-alt mr-1"></i> ${now.toLocaleTimeString()}`;
+        `<i class="fas fa-sync-alt mr-1"></i> ${phTime} (PH)`;
 }
 
 function updateConnectionStatus(connected) {
