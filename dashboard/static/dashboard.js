@@ -204,7 +204,7 @@ function renderAgentTable(agents) {
     const tbody = document.getElementById('agentTable');
 
     if (agents.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-gray-400">No agents active today</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-400">No agents active today</td></tr>';
         return;
     }
 
@@ -212,14 +212,30 @@ function renderAgentTable(agents) {
         // Check if agent is currently on break
         const onBreak = activeBreaksData.find(b => b.user_id === a.user_id);
         const statusDot = onBreak ? 'status-on_break' : 'status-available';
-        const statusText = onBreak ? `On Break (${onBreak.break_type})` : 'Available';
+        const statusText = onBreak ? `On Break` : 'Available';
         const statusColor = onBreak ? 'text-amber-600' : 'text-gray-600';
 
+        // Active OUT column
+        let activeOutHtml;
+        if (onBreak) {
+            const mins = Math.round(onBreak.duration_minutes);
+            const durationClass = mins > 30 ? 'bg-red-100 text-red-700' :
+                                  mins > 15 ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700';
+            activeOutHtml = `
+                <div class="inline-flex flex-col items-center">
+                    <span class="px-2 py-1 rounded-full text-xs font-bold ${durationClass}">${mins}m</span>
+                    <span class="text-xs text-gray-500 mt-1">${onBreak.break_type}</span>
+                </div>
+            `;
+        } else {
+            activeOutHtml = '<span class="text-gray-300">-</span>';
+        }
+
         return `
-            <tr class="table-row">
+            <tr class="table-row ${onBreak ? 'bg-amber-50' : ''}">
                 <td class="px-4 py-3">
                     <div class="flex items-center gap-2">
-                        <div class="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center text-xs font-medium">
+                        <div class="w-8 h-8 ${onBreak ? 'bg-amber-200' : 'bg-gray-200'} rounded-full flex items-center justify-center text-xs font-medium">
                             ${getInitials(a.full_name)}
                         </div>
                         <span class="font-medium text-gray-800">${a.full_name}</span>
@@ -230,6 +246,9 @@ function renderAgentTable(agents) {
                         <span class="status-dot ${statusDot}"></span>
                         <span class="text-sm ${statusColor}">${statusText}</span>
                     </div>
+                </td>
+                <td class="px-4 py-3 text-center">
+                    ${activeOutHtml}
                 </td>
                 <td class="px-4 py-3 text-center">
                     <span class="font-medium">${a.total_breaks}</span>
