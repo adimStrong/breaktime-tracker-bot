@@ -198,6 +198,7 @@ function formatTime(timestamp) {
 function updateAgentTable(agents) {
     agentData = agents;
     renderAgentTable(agents);
+    renderAgentCardsMobile(agents);
 }
 
 function renderAgentTable(agents) {
@@ -268,6 +269,73 @@ function filterAgents() {
     const search = document.getElementById('agentSearch').value.toLowerCase();
     const filtered = agentData.filter(a => a.full_name.toLowerCase().includes(search));
     renderAgentTable(filtered);
+    renderAgentCardsMobile(filtered);
+}
+
+function renderAgentCardsMobile(agents) {
+    const container = document.getElementById('agentCardsMobile');
+    if (!container) return;
+
+    if (agents.length === 0) {
+        container.innerHTML = '<div class="text-center text-gray-400 py-4">No agents active today</div>';
+        return;
+    }
+
+    container.innerHTML = agents.map(a => {
+        // Check if agent is currently on break
+        const onBreak = activeBreaksData.find(b => b.user_id === a.user_id);
+        const statusColor = onBreak ? 'bg-amber-100 border-amber-300' : 'bg-white border-gray-200';
+        const statusDot = onBreak ? 'status-on_break' : 'status-available';
+        const statusText = onBreak ? 'On Break' : 'Available';
+
+        // Active OUT badge
+        let activeOutHtml = '';
+        if (onBreak) {
+            const mins = Math.round(onBreak.duration_minutes);
+            const durationClass = mins > 30 ? 'bg-red-500' :
+                                  mins > 15 ? 'bg-amber-500' : 'bg-green-500';
+            activeOutHtml = `
+                <div class="flex items-center gap-1">
+                    <span class="px-2 py-0.5 rounded-full text-xs font-bold text-white ${durationClass}">${mins}m</span>
+                    <span class="text-xs text-gray-500">${onBreak.break_type}</span>
+                </div>
+            `;
+        }
+
+        return `
+            <div class="p-3 rounded-lg border ${statusColor}">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2">
+                        <div class="w-8 h-8 ${onBreak ? 'bg-amber-200' : 'bg-gray-200'} rounded-full flex items-center justify-center text-xs font-medium">
+                            ${getInitials(a.full_name)}
+                        </div>
+                        <div>
+                            <p class="font-medium text-gray-800 text-sm">${a.full_name}</p>
+                            <div class="flex items-center gap-1">
+                                <span class="status-dot ${statusDot}"></span>
+                                <span class="text-xs text-gray-500">${statusText}</span>
+                            </div>
+                        </div>
+                    </div>
+                    ${activeOutHtml}
+                </div>
+                <div class="flex justify-between text-xs text-gray-600 bg-gray-50 rounded p-2">
+                    <div class="text-center">
+                        <p class="font-bold text-gray-800">${a.total_breaks}</p>
+                        <p>Breaks</p>
+                    </div>
+                    <div class="text-center">
+                        <p class="font-bold text-gray-800">${a.total_duration.toFixed(0)}m</p>
+                        <p>Total</p>
+                    </div>
+                    <div class="text-center">
+                        <p class="font-bold text-gray-800">${a.avg_duration.toFixed(1)}m</p>
+                        <p>Avg</p>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
 }
 
 // ============================================
@@ -422,16 +490,32 @@ function updateLastRefresh() {
     });
     document.getElementById('lastUpdate').innerHTML =
         `<i class="fas fa-sync-alt mr-1"></i> ${phTime} (PH)`;
+
+    // Update mobile version
+    const mobileUpdate = document.getElementById('lastUpdateMobile');
+    if (mobileUpdate) {
+        mobileUpdate.innerHTML = `<i class="fas fa-sync-alt mr-1"></i> ${phTime} (PH)`;
+    }
 }
 
 function updateConnectionStatus(connected) {
     const status = document.getElementById('connectionStatus');
+    const statusMobile = document.getElementById('connectionStatusMobile');
+
     if (connected) {
         status.className = 'flex items-center gap-2 px-3 py-1 rounded-full bg-green-500/20 text-green-300 text-sm';
         status.innerHTML = '<span class="status-dot status-available"></span> Connected';
+        if (statusMobile) {
+            statusMobile.className = 'flex items-center gap-1 px-2 py-1 rounded-full bg-green-500/20 text-green-300 text-xs';
+            statusMobile.innerHTML = '<span class="status-dot status-available"></span>';
+        }
     } else {
         status.className = 'flex items-center gap-2 px-3 py-1 rounded-full bg-red-500/20 text-red-300 text-sm';
         status.innerHTML = '<span class="status-dot" style="background:#ef4444"></span> Disconnected';
+        if (statusMobile) {
+            statusMobile.className = 'flex items-center gap-1 px-2 py-1 rounded-full bg-red-500/20 text-red-300 text-xs';
+            statusMobile.innerHTML = '<span class="status-dot" style="background:#ef4444"></span>';
+        }
     }
 }
 
