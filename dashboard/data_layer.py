@@ -15,10 +15,25 @@ DATABASE_DIR = os.path.join(BASE_DIR, "database")
 
 # Philippine Timezone (UTC+8)
 PH_TIMEZONE = timezone(timedelta(hours=8))
+UTC_TIMEZONE = timezone.utc
 
 def get_ph_now():
     """Get current datetime in Philippine timezone."""
     return datetime.now(PH_TIMEZONE)
+
+def convert_to_ph_time(timestamp_str):
+    """Convert a timestamp string to PH timezone display format."""
+    try:
+        # Parse the timestamp
+        dt = pd.to_datetime(timestamp_str)
+        # If naive (no timezone), assume it's UTC
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC_TIMEZONE)
+        # Convert to PH time
+        ph_dt = dt.astimezone(PH_TIMEZONE)
+        return ph_dt.strftime('%Y-%m-%d %I:%M:%S %p')
+    except:
+        return timestamp_str
 
 
 # ============================================
@@ -333,6 +348,9 @@ def get_active_breaks() -> List[ActiveBreak]:
     for data in active.values():
         try:
             out_time = pd.to_datetime(data['out_time'])
+            # If naive, assume UTC
+            if out_time.tzinfo is None:
+                out_time = out_time.replace(tzinfo=UTC_TIMEZONE)
             duration = (now - out_time).total_seconds() / 60
         except:
             duration = 0
@@ -341,7 +359,7 @@ def get_active_breaks() -> List[ActiveBreak]:
             user_id=data['user_id'],
             full_name=data['full_name'],
             break_type=data['break_type'],
-            out_time=data['out_time'],
+            out_time=convert_to_ph_time(data['out_time']),
             duration_minutes=round(duration, 1)
         ))
 
@@ -424,7 +442,7 @@ def get_break_logs(start_date: date, end_date: date,
     logs = []
     for _, row in df.iterrows():
         logs.append({
-            'timestamp': row['Timestamp'],
+            'timestamp': convert_to_ph_time(row['Timestamp']),
             'full_name': row['Full Name'],
             'user_id': int(row['User ID']),
             'break_type': row['Break Type'],
