@@ -31,6 +31,9 @@ COPY scripts/ ./scripts/
 # Copy dashboard module
 COPY dashboard/ ./dashboard/
 
+# Copy seed data for initial database population
+COPY seed_data/ ./seed_data/
+
 # Create database directory
 RUN mkdir -p /app/database
 
