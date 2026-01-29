@@ -243,6 +243,106 @@ async def get_history_logs(
 
 
 # ============================================
+# SYSTEM MANAGEMENT
+# ============================================
+
+@app.post("/api/system/reset", tags=["System"])
+async def reset_system():
+    """
+    Reset system: Clear bot cache signal and close all active breaks.
+    The bot will pick up the signal and clear its in-memory sessions.
+    """
+    try:
+        # Write signal file for bot to clear its cache
+        signal_file = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "database",
+            ".clear_cache_signal"
+        )
+        os.makedirs(os.path.dirname(signal_file), exist_ok=True)
+
+        with open(signal_file, 'w') as f:
+            f.write(get_ph_now().isoformat())
+
+        return {
+            "status": "success",
+            "message": "Reset signal sent. Bot will clear cache on next check cycle.",
+            "signal_file": signal_file,
+            "timestamp": get_ph_now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/system/force-close-all", tags=["System"])
+async def force_close_all_breaks():
+    """
+    Force close all active breaks by writing BACK entries to Excel.
+    """
+    try:
+        from dashboard.data_layer import get_active_breaks
+        import pandas as pd
+
+        active = get_active_breaks()
+        closed_count = 0
+
+        if active:
+            # Get today's log file
+            today = get_ph_date()
+            year_month = today.strftime('%Y-%m')
+            database_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "database"
+            )
+            month_dir = os.path.join(database_dir, year_month)
+            log_file = os.path.join(month_dir, f"break_logs_{today}.xlsx")
+
+            if os.path.exists(log_file):
+                df = pd.read_excel(log_file, engine='openpyxl')
+
+                now = get_ph_now()
+                timestamp = now.strftime('%Y-%m-%d %H:%M:%S')
+
+                for brk in active:
+                    # Add BACK entry for each active break
+                    new_row = pd.DataFrame([[
+                        brk.user_id,
+                        brk.username or 'N/A',
+                        brk.full_name,
+                        brk.break_type,
+                        'BACK',
+                        timestamp,
+                        brk.duration_minutes,
+                        'System force-closed'
+                    ]], columns=['User ID', 'Username', 'Full Name', 'Break Type', 'Action', 'Timestamp', 'Duration (minutes)', 'Reason'])
+
+                    df = pd.concat([df, new_row], ignore_index=True)
+                    closed_count += 1
+
+                df.to_excel(log_file, index=False, engine='openpyxl')
+
+        # Also send reset signal to bot
+        signal_file = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "database",
+            ".clear_cache_signal"
+        )
+        with open(signal_file, 'w') as f:
+            f.write(get_ph_now().isoformat())
+
+        return {
+            "status": "success",
+            "closed_count": closed_count,
+            "message": f"Force-closed {closed_count} active breaks and sent cache clear signal to bot.",
+            "timestamp": get_ph_now().isoformat()
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
 # EXPORT
 # ============================================
 

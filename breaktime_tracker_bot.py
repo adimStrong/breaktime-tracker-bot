@@ -42,6 +42,9 @@ user_sessions = {}
 # Store users waiting to provide reasons
 waiting_for_reason_users = {}
 
+# Store last action timestamps to prevent duplicates (user_id -> timestamp)
+last_action_timestamps = {}
+
 
 def get_daily_log_file():
     """Get the log file path for today's date."""
@@ -79,6 +82,22 @@ def log_break_activity(user_id, username, full_name, break_type, action, timesta
     Returns True if local logging succeeded, False otherwise.
     Excel Online sync is fire-and-forget and won't affect return value.
     """
+    global last_action_timestamps
+
+    # Deduplication: Prevent logging same action within 5 seconds
+    action_key = f"{user_id}_{action}_{break_type}"
+    current_time = get_ph_now()
+
+    if action_key in last_action_timestamps:
+        last_time = last_action_timestamps[action_key]
+        time_diff = (current_time - last_time).total_seconds()
+        if time_diff < 5:  # Within 5 seconds = duplicate
+            print(f"[DUPLICATE] Skipped duplicate {action} for user {user_id} (within {time_diff:.1f}s)")
+            return True  # Return True to not show error to user
+
+    # Update last action timestamp
+    last_action_timestamps[action_key] = current_time
+
     try:
         log_file = get_daily_log_file()
 
@@ -598,10 +617,36 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 
+def check_and_clear_cache_signal():
+    """Check for cache clear signal from API and clear user_sessions if needed."""
+    global user_sessions, last_action_timestamps
+    signal_file = os.path.join(DATABASE_DIR, ".clear_cache_signal")
+
+    if os.path.exists(signal_file):
+        try:
+            # Read signal timestamp
+            with open(signal_file, 'r') as f:
+                signal_time = f.read().strip()
+            # Delete signal file
+            os.remove(signal_file)
+            # Count before clearing
+            count = len([s for s in user_sessions.values() if s.get('active')])
+            # Clear all caches
+            user_sessions.clear()
+            last_action_timestamps.clear()
+            print(f"🔄 Cache cleared by system signal at {signal_time}")
+            print(f"   Cleared {count} active sessions from memory")
+        except Exception as e:
+            print(f"⚠️ Error processing cache clear signal: {e}")
+
+
 async def check_break_reminders(context: ContextTypes.DEFAULT_TYPE):
     """Periodically check for long-running breaks and send reminders."""
+    # Check for cache clear signal from API
+    check_and_clear_cache_signal()
+
     now = get_ph_now()
-    for user_id, session in user_sessions.items():
+    for user_id, session in list(user_sessions.items()):  # Use list() to avoid dict size change during iteration
         if session.get('active') and not session.get('reminder_sent'):
             break_type = session.get('break_type')
 
