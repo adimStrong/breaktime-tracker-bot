@@ -1,12 +1,13 @@
 """
 Excel Online Handler
 Manages Excel Online operations for break event logging.
+With circuit breaker pattern for resilience.
 """
 
 import os
 import asyncio
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .auth import is_configured
 from .graph_client import get_client
@@ -16,9 +17,46 @@ EXCEL_FILE_ID = os.getenv('EXCEL_FILE_ID', '')
 EXCEL_TABLE_NAME = os.getenv('EXCEL_TABLE_NAME', 'BreakLog')
 EXCEL_SYNC_ENABLED = os.getenv('EXCEL_SYNC_ENABLED', 'false').lower() == 'true'
 
+# Sync timeout in seconds
+SYNC_TIMEOUT_SECONDS = 5
+
 # Track initialization status
 _initialized = False
 _init_failed = False
+
+# Circuit breaker state
+_consecutive_failures = 0
+_circuit_open_until: Optional[datetime] = None
+CIRCUIT_BREAKER_THRESHOLD = 3  # failures before tripping
+CIRCUIT_BREAKER_RESET_MINUTES = 5  # minutes before retry
+
+
+def _is_circuit_open() -> bool:
+    """Check if the circuit breaker is open (sync disabled temporarily)."""
+    global _circuit_open_until
+    if _circuit_open_until is None:
+        return False
+    if datetime.now() >= _circuit_open_until:
+        # Reset circuit breaker
+        print(f"[Excel] Circuit breaker reset - re-enabling sync")
+        _circuit_open_until = None
+        return False
+    return True
+
+
+def _record_success():
+    """Record a successful sync, resetting failure count."""
+    global _consecutive_failures
+    _consecutive_failures = 0
+
+
+def _record_failure():
+    """Record a failed sync, potentially tripping the circuit breaker."""
+    global _consecutive_failures, _circuit_open_until
+    _consecutive_failures += 1
+    if _consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD:
+        _circuit_open_until = datetime.now() + timedelta(minutes=CIRCUIT_BREAKER_RESET_MINUTES)
+        print(f"[Excel] Circuit breaker TRIPPED after {_consecutive_failures} failures - sync disabled for {CIRCUIT_BREAKER_RESET_MINUTES} minutes")
 
 
 async def init_excel_handler() -> bool:
@@ -96,8 +134,13 @@ async def add_break_event(
     if not EXCEL_SYNC_ENABLED:
         return False
 
+    # Check circuit breaker
+    if _is_circuit_open():
+        return False
+
     # Initialize if needed
     if not _initialized and not await init_excel_handler():
+        _record_failure()
         return False
 
     try:
@@ -125,20 +168,54 @@ async def add_break_event(
             reason_val
         ]]
 
-        # Add row to Excel table
+        # Add row to Excel table with timeout
         client = get_client()
-        result = await client.add_table_row(EXCEL_FILE_ID, EXCEL_TABLE_NAME, row_data)
+        result = await asyncio.wait_for(
+            client.add_table_row(EXCEL_FILE_ID, EXCEL_TABLE_NAME, row_data),
+            timeout=SYNC_TIMEOUT_SECONDS
+        )
 
         if 'error' in result:
             print(f"[Excel] Failed to add row: {result['error']}")
+            _record_failure()
             return False
 
         print(f"[Excel] Synced {action}: {full_name} - {break_type}")
+        _record_success()
         return True
 
+    except asyncio.TimeoutError:
+        print(f"[Excel] Sync timeout after {SYNC_TIMEOUT_SECONDS}s")
+        _record_failure()
+        return False
     except Exception as e:
         print(f"[Excel] Error adding break event: {e}")
+        _record_failure()
         return False
+
+
+async def _add_break_event_safe(
+    user_id: int,
+    username: str,
+    full_name: str,
+    break_type: str,
+    action: str,
+    timestamp: Optional[datetime] = None,
+    duration: Optional[float] = None,
+    reason: Optional[str] = None
+) -> None:
+    """
+    Safe wrapper for add_break_event that catches all exceptions.
+    Used for fire-and-forget background sync.
+    """
+    try:
+        await add_break_event(
+            user_id, username, full_name, break_type,
+            action, timestamp, duration, reason
+        )
+    except Exception as e:
+        print(f"[Excel] Background sync error: {e}")
+        _record_failure()
 
 
 def sync_break_event(
@@ -152,31 +229,32 @@ def sync_break_event(
     reason: Optional[str] = None
 ) -> None:
     """
-    Synchronous wrapper for add_break_event.
-    Runs the async function in a new event loop if needed.
-    Non-blocking - failures don't raise exceptions.
+    Non-blocking wrapper for add_break_event.
+    Schedules the sync as a background task - never blocks the bot.
+    Failures don't raise exceptions or affect bot operation.
     """
     if not EXCEL_SYNC_ENABLED:
         return
 
+    # Check circuit breaker early to avoid unnecessary work
+    if _is_circuit_open():
+        return
+
     try:
         # Try to get the running event loop
-        try:
-            loop = asyncio.get_running_loop()
-            # If we're in an async context, create a task
-            asyncio.create_task(add_break_event(
-                user_id, username, full_name, break_type,
-                action, timestamp, duration, reason
-            ))
-        except RuntimeError:
-            # No running event loop, create a new one
-            asyncio.run(add_break_event(
-                user_id, username, full_name, break_type,
-                action, timestamp, duration, reason
-            ))
+        loop = asyncio.get_running_loop()
+        # Schedule as background task - fire and forget
+        loop.create_task(_add_break_event_safe(
+            user_id, username, full_name, break_type,
+            action, timestamp, duration, reason
+        ))
+    except RuntimeError:
+        # No running event loop - this shouldn't happen in normal bot operation
+        # but handle gracefully anyway
+        print("[Excel] Warning: No event loop available for sync")
     except Exception as e:
         # Never let Excel sync errors break the bot
-        print(f"[Excel] Sync error (non-blocking): {e}")
+        print(f"[Excel] Sync scheduling error (non-blocking): {e}")
 
 
 async def ensure_table_exists() -> bool:

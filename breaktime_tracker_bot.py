@@ -74,40 +74,51 @@ def init_database_structure():
 
 
 def log_break_activity(user_id, username, full_name, break_type, action, timestamp, duration=None, reason=None):
-    """Log break activity to daily Excel file and sync to Excel Online"""
-    log_file = get_daily_log_file()
+    """
+    Log break activity to daily Excel file and sync to Excel Online.
+    Returns True if local logging succeeded, False otherwise.
+    Excel Online sync is fire-and-forget and won't affect return value.
+    """
+    try:
+        log_file = get_daily_log_file()
 
-    # Read existing data
-    if os.path.exists(log_file):
-        df = pd.read_excel(log_file, engine='openpyxl')
-    else:
-        df = pd.DataFrame(columns=['User ID', 'Username', 'Full Name', 'Break Type', 'Action', 'Timestamp', 'Duration (minutes)', 'Reason'])
+        # Read existing data
+        if os.path.exists(log_file):
+            df = pd.read_excel(log_file, engine='openpyxl')
+        else:
+            df = pd.DataFrame(columns=['User ID', 'Username', 'Full Name', 'Break Type', 'Action', 'Timestamp', 'Duration (minutes)', 'Reason'])
 
-    # Append new row
-    new_row = pd.DataFrame([[user_id, username, full_name, break_type, action, timestamp, duration or '', reason or '']],
-                          columns=['User ID', 'Username', 'Full Name', 'Break Type', 'Action', 'Timestamp', 'Duration (minutes)', 'Reason'])
-    df = pd.concat([df, new_row], ignore_index=True)
+        # Append new row
+        new_row = pd.DataFrame([[user_id, username, full_name, break_type, action, timestamp, duration or '', reason or '']],
+                              columns=['User ID', 'Username', 'Full Name', 'Break Type', 'Action', 'Timestamp', 'Duration (minutes)', 'Reason'])
+        df = pd.concat([df, new_row], ignore_index=True)
 
-    # Save to local Excel file
-    df.to_excel(log_file, index=False, engine='openpyxl')
+        # Save to local Excel file
+        df.to_excel(log_file, index=False, engine='openpyxl')
 
-    # Sync to Excel Online (non-blocking)
-    if EXCEL_SYNC_AVAILABLE:
-        try:
-            # Parse timestamp string to datetime for Excel sync
-            ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
-            sync_break_event(
-                user_id=user_id,
-                username=username,
-                full_name=full_name,
-                break_type=break_type,
-                action=action,
-                timestamp=ts,
-                duration=duration,
-                reason=reason
-            )
-        except Exception as e:
-            print(f"[Excel] Sync error (non-blocking): {e}")
+        # Sync to Excel Online (non-blocking, fire-and-forget)
+        if EXCEL_SYNC_AVAILABLE:
+            try:
+                # Parse timestamp string to datetime for Excel sync
+                ts = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
+                sync_break_event(
+                    user_id=user_id,
+                    username=username,
+                    full_name=full_name,
+                    break_type=break_type,
+                    action=action,
+                    timestamp=ts,
+                    duration=duration,
+                    reason=reason
+                )
+            except Exception as e:
+                print(f"[Excel] Sync error (non-blocking): {e}")
+
+        return True
+
+    except Exception as e:
+        print(f"[ERROR] Failed to log break activity: {e}")
+        return False
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -226,7 +237,13 @@ Please type the reason for your break:""",
             session_data['reminder_sent'] = False
         user_sessions[user_id] = session_data
 
-        log_break_activity(user_id, username, full_name, break_type, 'OUT', timestamp)
+        # Log activity with error handling
+        if not log_break_activity(user_id, username, full_name, break_type, 'OUT', timestamp):
+            await query.message.reply_text(
+                f"⚠️ **{full_name}** - Break started but logging failed.\nPlease notify your supervisor.",
+                parse_mode='Markdown'
+            )
+            return ConversationHandler.END
 
         await query.message.reply_text(
             f"""✅ **{full_name}** - Break Started
@@ -268,7 +285,16 @@ You are trying to end a '{break_type}' break, but your active break is '{active_
         end_time = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
         duration_minutes = round((end_time - start_time).total_seconds() / 60, 1)
 
-        log_break_activity(user_id, username, full_name, break_type, 'BACK', timestamp, duration_minutes, reason)
+        # Log activity with error handling
+        if not log_break_activity(user_id, username, full_name, break_type, 'BACK', timestamp, duration_minutes, reason):
+            await query.message.reply_text(
+                f"⚠️ **{full_name}** - Break ended but logging failed.\nPlease notify your supervisor.",
+                parse_mode='Markdown'
+            )
+            # Still clear the session even if logging fails
+            user_sessions[user_id] = {'active': False}
+            return ConversationHandler.END
+
         user_sessions[user_id] = {'active': False}
 
         reason_text = f"\n📝 Reason: {reason}" if reason else ""
@@ -308,8 +334,13 @@ async def handle_reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'group_chat_id': group_chat_id
     }
 
-    # Log the activity with reason
-    log_break_activity(user_id, username, full_name, break_type, 'OUT', start_time, reason=reason)
+    # Log the activity with reason and error handling
+    if not log_break_activity(user_id, username, full_name, break_type, 'OUT', start_time, reason=reason):
+        await update.message.reply_text(
+            f"⚠️ **{full_name}** - Break started but logging failed.\nPlease notify your supervisor.",
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
 
     await update.message.reply_text(
         f"""✅ **{full_name}** - Break Started
@@ -494,7 +525,13 @@ Example: `/o1 emergency call`""",
             session_data['reminder_sent'] = False
         user_sessions[user_id] = session_data
 
-        log_break_activity(user_id, username, full_name, break_type, 'OUT', timestamp, reason=reason_from_command)
+        # Log activity with error handling
+        if not log_break_activity(user_id, username, full_name, break_type, 'OUT', timestamp, reason=reason_from_command):
+            await update.message.reply_text(
+                f"⚠️ **{full_name}** - Break started but logging failed.\nPlease notify your supervisor.",
+                reply_markup=keyboard, parse_mode='Markdown'
+            )
+            return
 
         reason_text = f"\n📝 Reason: {reason_from_command}" if reason_from_command else ""
         await update.message.reply_text(
@@ -533,7 +570,16 @@ You are trying to end a '{break_type}' break, but your active break is '{active_
         duration_minutes = round((end_time - start_time).total_seconds() / 60, 1)
         reason = active_session.get('reason')
 
-        log_break_activity(user_id, username, full_name, break_type, 'BACK', timestamp, duration_minutes, reason)
+        # Log activity with error handling
+        if not log_break_activity(user_id, username, full_name, break_type, 'BACK', timestamp, duration_minutes, reason):
+            await update.message.reply_text(
+                f"⚠️ **{full_name}** - Break ended but logging failed.\nPlease notify your supervisor.",
+                reply_markup=keyboard, parse_mode='Markdown'
+            )
+            # Still clear the session even if logging fails
+            user_sessions[user_id] = {'active': False}
+            return
+
         user_sessions[user_id] = {'active': False}
 
         reason_text = f"\n📝 Reason: {reason}" if reason else ""
