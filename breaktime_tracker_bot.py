@@ -285,17 +285,16 @@ You are trying to end a '{break_type}' break, but your active break is '{active_
         end_time = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
         duration_minutes = round((end_time - start_time).total_seconds() / 60, 1)
 
+        # Clear session FIRST to stop reminders immediately
+        user_sessions[user_id] = {'active': False}
+
         # Log activity with error handling
         if not log_break_activity(user_id, username, full_name, break_type, 'BACK', timestamp, duration_minutes, reason):
             await query.message.reply_text(
                 f"⚠️ **{full_name}** - Break ended but logging failed.\nPlease notify your supervisor.",
                 parse_mode='Markdown'
             )
-            # Still clear the session even if logging fails
-            user_sessions[user_id] = {'active': False}
             return ConversationHandler.END
-
-        user_sessions[user_id] = {'active': False}
 
         reason_text = f"\n📝 Reason: {reason}" if reason else ""
         await query.message.reply_text(
@@ -570,17 +569,16 @@ You are trying to end a '{break_type}' break, but your active break is '{active_
         duration_minutes = round((end_time - start_time).total_seconds() / 60, 1)
         reason = active_session.get('reason')
 
+        # Clear session FIRST to stop reminders immediately
+        user_sessions[user_id] = {'active': False}
+
         # Log activity with error handling
         if not log_break_activity(user_id, username, full_name, break_type, 'BACK', timestamp, duration_minutes, reason):
             await update.message.reply_text(
                 f"⚠️ **{full_name}** - Break ended but logging failed.\nPlease notify your supervisor.",
                 reply_markup=keyboard, parse_mode='Markdown'
             )
-            # Still clear the session even if logging fails
-            user_sessions[user_id] = {'active': False}
             return
-
-        user_sessions[user_id] = {'active': False}
 
         reason_text = f"\n📝 Reason: {reason}" if reason else ""
         await update.message.reply_text(
