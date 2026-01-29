@@ -60,6 +60,45 @@ def get_daily_log_file():
     return log_file
 
 
+def get_active_session_from_excel(user_id: int) -> dict:
+    """
+    Recover active session from Excel file if not in memory.
+    Returns session dict if user has active break, None otherwise.
+    """
+    try:
+        log_file = get_daily_log_file()
+        if not os.path.exists(log_file):
+            return None
+
+        df = pd.read_excel(log_file, engine='openpyxl')
+        if df.empty:
+            return None
+
+        # Filter to this user's records
+        user_df = df[df['User ID'] == user_id]
+        if user_df.empty:
+            return None
+
+        # Get last action for this user
+        last_row = user_df.iloc[-1]
+
+        # If last action is OUT, user has active break
+        if last_row['Action'] == 'OUT':
+            return {
+                'break_type': last_row['Break Type'],
+                'start_time': str(last_row['Timestamp']),
+                'active': True,
+                'full_name': last_row['Full Name'],
+                'reason': last_row['Reason'] if pd.notna(last_row['Reason']) else None,
+                'recovered_from_excel': True
+            }
+
+        return None
+    except Exception as e:
+        print(f"[Excel Recovery] Error: {e}")
+        return None
+
+
 def init_database_structure():
     """Initialize the database directory structure."""
     # Create main database directory
@@ -215,7 +254,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action_type = action_code[1]
     break_type = break_types.get(break_type_code, 'Unknown')
 
+    # Check in-memory session first, then try Excel recovery
     active_session = user_sessions.get(user_id)
+    if not active_session or not active_session.get('active'):
+        # Try to recover from Excel (handles bot restarts/cache clears)
+        excel_session = get_active_session_from_excel(user_id)
+        if excel_session:
+            user_sessions[user_id] = excel_session
+            active_session = excel_session
+            print(f"[Recovery] Restored session for {full_name} from Excel")
+
     is_active = active_session and active_session.get('active')
 
     # Handle "OUT" actions (E1, C1, S1, O1)
@@ -504,7 +552,16 @@ async def handle_break_command(update: Update, context: ContextTypes.DEFAULT_TYP
     action_type = command[1]
     break_type = break_types.get(break_type_code, 'Unknown')
 
+    # Check in-memory session first, then try Excel recovery
     active_session = user_sessions.get(user_id)
+    if not active_session or not active_session.get('active'):
+        # Try to recover from Excel (handles bot restarts/cache clears)
+        excel_session = get_active_session_from_excel(user_id)
+        if excel_session:
+            user_sessions[user_id] = excel_session
+            active_session = excel_session
+            print(f"[Recovery] Restored session for {full_name} from Excel")
+
     is_active = active_session and active_session.get('active')
 
     # Handle OUT actions
