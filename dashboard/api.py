@@ -307,7 +307,7 @@ async def force_close_all_breaks():
                     # Add BACK entry for each active break
                     new_row = pd.DataFrame([[
                         brk.user_id,
-                        brk.username or 'N/A',
+                        'N/A',  # Username not available in ActiveBreak
                         brk.full_name,
                         brk.break_type,
                         'BACK',
