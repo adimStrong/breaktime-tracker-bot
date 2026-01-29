@@ -23,9 +23,19 @@ def get_timestamp():
 
 
 def run_bot():
-    """Run the Telegram bot."""
-    print(f"[{get_timestamp()}] [Bot] Starting Telegram bot...")
-    subprocess.run([sys.executable, "breaktime_tracker_bot.py"])
+    """Run the Telegram bot with auto-restart on crash."""
+    while True:
+        print(f"[{get_timestamp()}] [Bot] Starting Telegram bot...")
+        try:
+            result = subprocess.run([sys.executable, "-u", "breaktime_tracker_bot.py"])
+            print(f"[{get_timestamp()}] [Bot] Bot exited with code {result.returncode}")
+            if result.returncode == 0:
+                break  # Clean exit
+            print(f"[{get_timestamp()}] [Bot] Restarting in 5 seconds...")
+            time.sleep(5)
+        except Exception as e:
+            print(f"[{get_timestamp()}] [Bot] Error: {e}, restarting in 5 seconds...")
+            time.sleep(5)
 
 
 def run_dashboard():
