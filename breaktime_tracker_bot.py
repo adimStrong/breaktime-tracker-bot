@@ -738,19 +738,10 @@ def main():
     # Initialize database structure
     init_database_structure()
 
-    # Initialize Excel Online sync (if configured)
+    # Note: Excel Online sync will be initialized when first used (lazy init)
+    # This avoids event loop conflicts with the Telegram bot
     if EXCEL_SYNC_AVAILABLE:
-        import asyncio
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            result = loop.run_until_complete(init_excel_handler())
-            if result:
-                print("✅ Excel Online sync enabled")
-            else:
-                print("⚠️ Excel Online sync not configured or failed to initialize")
-        except Exception as e:
-            print(f"⚠️ Excel Online sync initialization error: {e}")
+        print("ℹ️ Excel Online sync module loaded (will init on first use)")
     else:
         print("ℹ️ Excel Online sync not available (module not installed)")
 
