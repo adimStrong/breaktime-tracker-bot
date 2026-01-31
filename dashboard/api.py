@@ -275,64 +275,101 @@ async def reset_system():
 
 
 @app.delete("/api/system/force-close-all", tags=["System"])
-async def force_close_all_breaks():
+async def force_close_all_breaks(check_days: int = Query(3, ge=1, le=7, description="Days to check for orphaned breaks")):
     """
     Force close all active breaks by writing BACK entries to Excel.
+    Checks multiple days back to find orphaned breaks.
     """
     try:
-        from dashboard.data_layer import get_active_breaks
         import pandas as pd
+        from datetime import timedelta
 
-        active = get_active_breaks()
+        now = get_ph_now()
+        today = get_ph_date()
+        year_month = today.strftime('%Y-%m')
+        timestamp = now.strftime('%Y-%m-%d %H:%M:%S')
+
+        # Use BASE_DIR for Railway volume compatibility
+        base_dir = os.environ.get('BASE_DIR', os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        database_dir = os.path.join(base_dir, "database")
+
+        # Collect all active breaks from multiple days
+        all_breaks = {}  # user_id -> (row, date_str)
+
+        for days_back in range(check_days):
+            check_date = now - timedelta(days=days_back)
+            date_str = check_date.strftime('%Y-%m-%d')
+            check_year_month = check_date.strftime('%Y-%m')
+            log_file = os.path.join(database_dir, check_year_month, f"break_logs_{date_str}.xlsx")
+
+            if not os.path.exists(log_file):
+                continue
+
+            try:
+                df = pd.read_excel(log_file, engine='openpyxl')
+                if df.empty:
+                    continue
+
+                df_sorted = df.sort_values('Timestamp')
+                for _, row in df_sorted.iterrows():
+                    user_id = int(row['User ID'])
+                    action = row['Action']
+                    if action == 'OUT':
+                        all_breaks[user_id] = (row.to_dict(), date_str)
+                    elif action == 'BACK' and user_id in all_breaks:
+                        del all_breaks[user_id]
+            except Exception as e:
+                print(f"[Force-Close] Error reading {log_file}: {e}")
+                continue
+
         closed_count = 0
-
-        if active:
-            # Get today's log file
-            today = get_ph_date()
-            year_month = today.strftime('%Y-%m')
-            database_dir = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                "database"
-            )
+        if all_breaks:
+            # Write BACK entries to today's file
             month_dir = os.path.join(database_dir, year_month)
+            os.makedirs(month_dir, exist_ok=True)
             log_file = os.path.join(month_dir, f"break_logs_{today}.xlsx")
 
             if os.path.exists(log_file):
                 df = pd.read_excel(log_file, engine='openpyxl')
+            else:
+                df = pd.DataFrame(columns=['User ID', 'Username', 'Full Name', 'Break Type', 'Action', 'Timestamp', 'Duration (minutes)', 'Reason'])
 
-                now = get_ph_now()
-                timestamp = now.strftime('%Y-%m-%d %H:%M:%S')
+            for user_id, (row_dict, date_str) in all_breaks.items():
+                # Calculate duration
+                try:
+                    out_time_str = str(row_dict['Timestamp']).split('.')[0]
+                    out_time = datetime.strptime(out_time_str, '%Y-%m-%d %H:%M:%S')
+                    duration = round((now.replace(tzinfo=None) - out_time).total_seconds() / 60, 1)
+                except:
+                    duration = 0
 
-                for brk in active:
-                    # Add BACK entry for each active break
-                    new_row = pd.DataFrame([[
-                        brk.user_id,
-                        'N/A',  # Username not available in ActiveBreak
-                        brk.full_name,
-                        brk.break_type,
-                        'BACK',
-                        timestamp,
-                        brk.duration_minutes,
-                        'System force-closed'
-                    ]], columns=['User ID', 'Username', 'Full Name', 'Break Type', 'Action', 'Timestamp', 'Duration (minutes)', 'Reason'])
+                new_row = pd.DataFrame([[
+                    user_id,
+                    row_dict.get('Username', 'N/A'),
+                    row_dict.get('Full Name', 'Unknown'),
+                    row_dict.get('Break Type', 'Unknown'),
+                    'BACK',
+                    timestamp,
+                    duration,
+                    f'System force-closed (from {date_str})'
+                ]], columns=['User ID', 'Username', 'Full Name', 'Break Type', 'Action', 'Timestamp', 'Duration (minutes)', 'Reason'])
 
-                    df = pd.concat([df, new_row], ignore_index=True)
-                    closed_count += 1
+                df = pd.concat([df, new_row], ignore_index=True)
+                closed_count += 1
+                print(f"[Force-Close] Closed: {row_dict.get('Full Name')} - {row_dict.get('Break Type')} ({duration:.0f}min from {date_str})")
 
-                df.to_excel(log_file, index=False, engine='openpyxl')
+            df.to_excel(log_file, index=False, engine='openpyxl')
 
-        # Also send reset signal to bot
-        signal_file = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "database",
-            ".clear_cache_signal"
-        )
+        # Send reset signal to bot (use BASE_DIR for Railway compatibility)
+        signal_file = os.path.join(database_dir, ".clear_cache_signal")
+        os.makedirs(os.path.dirname(signal_file), exist_ok=True)
         with open(signal_file, 'w') as f:
             f.write(get_ph_now().isoformat())
 
         return {
             "status": "success",
             "closed_count": closed_count,
+            "days_checked": check_days,
             "message": f"Force-closed {closed_count} active breaks and sent cache clear signal to bot.",
             "timestamp": get_ph_now().isoformat()
         }

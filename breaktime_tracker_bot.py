@@ -60,43 +60,103 @@ def get_daily_log_file():
     return log_file
 
 
-def get_active_session_from_excel(user_id: int) -> dict:
+def get_active_session_from_excel(user_id: int, check_days: int = 3) -> dict:
     """
     Recover active session from Excel file if not in memory.
+    Checks multiple days back to find orphaned breaks.
     Returns session dict if user has active break, None otherwise.
     """
     try:
-        log_file = get_daily_log_file()
-        if not os.path.exists(log_file):
-            return None
+        now = get_ph_now()
 
-        df = pd.read_excel(log_file, engine='openpyxl')
-        if df.empty:
-            return None
+        # Check today and previous days
+        for days_back in range(check_days):
+            check_date = now - timedelta(days=days_back)
+            date_str = check_date.strftime('%Y-%m-%d')
+            year_month = check_date.strftime('%Y-%m')
+            month_dir = os.path.join(DATABASE_DIR, year_month)
+            log_file = os.path.join(month_dir, f"break_logs_{date_str}.xlsx")
 
-        # Filter to this user's records
-        user_df = df[df['User ID'] == user_id]
-        if user_df.empty:
-            return None
+            if not os.path.exists(log_file):
+                continue
 
-        # Get last action for this user
-        last_row = user_df.iloc[-1]
+            df = pd.read_excel(log_file, engine='openpyxl')
+            if df.empty:
+                continue
 
-        # If last action is OUT, user has active break
-        if last_row['Action'] == 'OUT':
-            return {
-                'break_type': last_row['Break Type'],
-                'start_time': str(last_row['Timestamp']),
-                'active': True,
-                'full_name': last_row['Full Name'],
-                'reason': last_row['Reason'] if pd.notna(last_row['Reason']) else None,
-                'recovered_from_excel': True
-            }
+            # Filter to this user's records
+            user_df = df[df['User ID'] == user_id]
+            if user_df.empty:
+                continue
+
+            # Get last action for this user
+            last_row = user_df.iloc[-1]
+
+            # If last action is OUT, user has active break
+            if last_row['Action'] == 'OUT':
+                return {
+                    'break_type': last_row['Break Type'],
+                    'start_time': str(last_row['Timestamp']),
+                    'active': True,
+                    'full_name': last_row['Full Name'],
+                    'reason': last_row['Reason'] if pd.notna(last_row['Reason']) else None,
+                    'recovered_from_excel': True,
+                    'source_date': date_str
+                }
+            else:
+                # User's last action is BACK, no active break
+                return None
 
         return None
     except Exception as e:
         print(f"[Excel Recovery] Error: {e}")
         return None
+
+
+def load_all_active_sessions_from_excel(check_days: int = 3) -> int:
+    """
+    Load all active sessions from Excel files on startup.
+    Checks multiple days back to recover orphaned breaks.
+    Returns count of sessions loaded.
+    """
+    global user_sessions
+    loaded = 0
+
+    try:
+        now = get_ph_now()
+        all_users = set()
+
+        # Collect all user IDs from recent Excel files
+        for days_back in range(check_days):
+            check_date = now - timedelta(days=days_back)
+            date_str = check_date.strftime('%Y-%m-%d')
+            year_month = check_date.strftime('%Y-%m')
+            month_dir = os.path.join(DATABASE_DIR, year_month)
+            log_file = os.path.join(month_dir, f"break_logs_{date_str}.xlsx")
+
+            if not os.path.exists(log_file):
+                continue
+
+            try:
+                df = pd.read_excel(log_file, engine='openpyxl')
+                if not df.empty:
+                    all_users.update(df['User ID'].unique())
+            except Exception:
+                continue
+
+        # Check each user for active sessions
+        for user_id in all_users:
+            if user_id not in user_sessions or not user_sessions.get(user_id, {}).get('active'):
+                session = get_active_session_from_excel(int(user_id), check_days)
+                if session:
+                    user_sessions[user_id] = session
+                    loaded += 1
+                    print(f"   Recovered: {session.get('full_name', 'Unknown')} - {session.get('break_type')} (from {session.get('source_date', 'unknown')})")
+
+        return loaded
+    except Exception as e:
+        print(f"[Session Recovery] Error: {e}")
+        return 0
 
 
 def init_database_structure():
@@ -886,10 +946,18 @@ def main():
     application.add_handler(CommandHandler("o1", handle_break_command))
     application.add_handler(CommandHandler("o2", handle_break_command))
 
+    # Load active sessions from Excel (recover from restarts)
+    print("\n📂 Database location:", DATABASE_DIR)
+    print("📊 Today's log file:", get_daily_log_file())
+    print("\n🔄 Recovering active sessions from Excel...")
+    recovered = load_all_active_sessions_from_excel(check_days=3)
+    if recovered > 0:
+        print(f"✅ Recovered {recovered} active session(s) from Excel")
+    else:
+        print("   No active sessions to recover")
+
     # Start the bot
     print("\n🚀 Bot is now running...")
-    print("📂 Database location:", DATABASE_DIR)
-    print("📊 Today's log file:", get_daily_log_file())
     print("\nPress Ctrl+C to stop the bot\n")
     print("="*60 + "\n")
     application.run_polling(allowed_updates=Update.ALL_TYPES)

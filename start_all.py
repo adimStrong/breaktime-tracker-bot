@@ -86,9 +86,10 @@ def run_health_check():
             print(f"[{get_timestamp()}] [HEALTH] Health check error: {e}")
 
 
-def fix_stuck_active_breaks():
+def fix_stuck_active_breaks(check_days: int = 3):
     """
     One-time fix: Close any stuck active breaks by adding BACK entries.
+    Checks multiple days back to find orphaned breaks (not just today).
     This function is designed to be fail-safe - if anything goes wrong,
     it logs the error and continues without crashing the startup.
     """
@@ -97,75 +98,104 @@ def fix_stuck_active_breaks():
         from pathlib import Path
 
         now = datetime.now(PH_TZ)
-        today = now.strftime('%Y-%m-%d')
-        year_month = now.strftime('%Y-%m')
-
         base_dir = os.environ.get('BASE_DIR', os.path.dirname(os.path.abspath(__file__)))
-        log_file = Path(base_dir) / 'database' / year_month / f'break_logs_{today}.xlsx'
+        database_dir = Path(base_dir) / 'database'
 
-        if not log_file.exists():
-            print(f"[{get_timestamp()}] [FIX] No file for today ({today}), skipping fix")
+        # Collect all breaks from recent days
+        all_breaks = {}  # user_id -> (row, log_file, date)
+
+        for days_back in range(check_days):
+            check_date = now - timedelta(days=days_back)
+            date_str = check_date.strftime('%Y-%m-%d')
+            year_month = check_date.strftime('%Y-%m')
+            log_file = database_dir / year_month / f'break_logs_{date_str}.xlsx'
+
+            if not log_file.exists():
+                continue
+
+            try:
+                df = pd.read_excel(log_file, engine='openpyxl')
+                if df.empty:
+                    continue
+
+                df_sorted = df.sort_values('Timestamp')
+                for _, row in df_sorted.iterrows():
+                    user_id = int(row['User ID'])
+                    action = row['Action']
+                    if action == 'OUT':
+                        all_breaks[user_id] = (row, log_file, date_str)
+                    elif action == 'BACK' and user_id in all_breaks:
+                        del all_breaks[user_id]
+            except Exception as e:
+                print(f"[{get_timestamp()}] [FIX] Error reading {log_file.name}: {e}")
+                continue
+
+        if not all_breaks:
+            print(f"[{get_timestamp()}] [FIX] No stuck active breaks found (checked {check_days} days)")
             return
 
-        try:
-            df = pd.read_excel(log_file, engine='openpyxl')
-        except Exception as e:
-            print(f"[{get_timestamp()}] [FIX] Error reading log file: {e}")
-            return
+        print(f"[{get_timestamp()}] [FIX] Found {len(all_breaks)} stuck active breaks, closing them...")
 
-        if df.empty:
-            print(f"[{get_timestamp()}] [FIX] Log file is empty, nothing to fix")
-            return
-
-        # Find active breaks (OUT without BACK)
-        active = {}
-        try:
-            df_sorted = df.sort_values('Timestamp')
-            for _, row in df_sorted.iterrows():
-                user_id = int(row['User ID'])
-                action = row['Action']
-                if action == 'OUT':
-                    active[user_id] = row
-                elif action == 'BACK' and user_id in active:
-                    del active[user_id]
-        except Exception as e:
-            print(f"[{get_timestamp()}] [FIX] Error analyzing breaks: {e}")
-            return
-
-        if not active:
-            print(f"[{get_timestamp()}] [FIX] No stuck active breaks found")
-            return
-
-        print(f"[{get_timestamp()}] [FIX] Found {len(active)} stuck active breaks, adding BACK entries...")
-
-        # Add BACK entries for stuck breaks
+        # Group by log file to minimize file writes
+        closes_by_file = {}
         timestamp = now.strftime('%Y-%m-%d %H:%M:%S')
-        new_rows = []
-        for user_id, row in active.items():
-            new_rows.append({
+
+        for user_id, (row, log_file, date_str) in all_breaks.items():
+            # Calculate duration
+            try:
+                out_time_str = str(row['Timestamp']).split('.')[0]
+                out_time = datetime.strptime(out_time_str, '%Y-%m-%d %H:%M:%S')
+                duration = round((now.replace(tzinfo=None) - out_time).total_seconds() / 60, 1)
+            except:
+                duration = 0
+
+            new_row = {
                 'User ID': user_id,
                 'Username': row['Username'],
                 'Full Name': row['Full Name'],
                 'Break Type': row['Break Type'],
                 'Action': 'BACK',
                 'Timestamp': timestamp,
-                'Duration (minutes)': 0,
-                'Reason': 'Auto-closed by system'
-            })
-            print(f"[{get_timestamp()}] [FIX] Closing break for {row['Full Name']}")
+                'Duration (minutes)': duration,
+                'Reason': f'Auto-closed by system (from {date_str})'
+            }
 
-        # Append and save
-        try:
-            new_df = pd.DataFrame(new_rows)
-            df = pd.concat([df, new_df], ignore_index=True)
-            df.to_excel(log_file, index=False, engine='openpyxl')
-            print(f"[{get_timestamp()}] [FIX] Fixed {len(new_rows)} stuck breaks")
-        except Exception as e:
-            print(f"[{get_timestamp()}] [FIX] Error saving fixed breaks: {e}")
+            # Add to today's file, not the original file
+            today = now.strftime('%Y-%m-%d')
+            year_month = now.strftime('%Y-%m')
+            today_file = database_dir / year_month / f'break_logs_{today}.xlsx'
+
+            if str(today_file) not in closes_by_file:
+                closes_by_file[str(today_file)] = []
+            closes_by_file[str(today_file)].append(new_row)
+
+            print(f"[{get_timestamp()}] [FIX] Closing: {row['Full Name']} - {row['Break Type']} (from {date_str}, {duration:.0f}min)")
+
+        # Write BACK entries to today's file
+        for file_path, new_rows in closes_by_file.items():
+            try:
+                file_path = Path(file_path)
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+
+                if file_path.exists():
+                    df = pd.read_excel(file_path, engine='openpyxl')
+                else:
+                    df = pd.DataFrame(columns=['User ID', 'Username', 'Full Name', 'Break Type', 'Action', 'Timestamp', 'Duration (minutes)', 'Reason'])
+
+                new_df = pd.DataFrame(new_rows)
+                df = pd.concat([df, new_df], ignore_index=True)
+                df.to_excel(file_path, index=False, engine='openpyxl')
+                print(f"[{get_timestamp()}] [FIX] Wrote {len(new_rows)} BACK entries to {file_path.name}")
+            except Exception as e:
+                print(f"[{get_timestamp()}] [FIX] Error saving to {file_path}: {e}")
+
+        print(f"[{get_timestamp()}] [FIX] Fixed {len(all_breaks)} stuck breaks")
 
     except Exception as e:
         # Catch-all: Never let this function crash the bot startup
+        import traceback
         print(f"[{get_timestamp()}] [FIX] Unexpected error (continuing anyway): {e}")
+        traceback.print_exc()
 
 
 def sync_seed_data():
