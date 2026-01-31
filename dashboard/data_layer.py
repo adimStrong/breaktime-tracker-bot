@@ -187,9 +187,9 @@ def get_realtime_metrics() -> RealtimeMetrics:
     if 'Duration (minutes)' in non_cr.columns and not non_cr.empty:
         non_cr = non_cr.copy()
         non_cr['Duration (minutes)'] = pd.to_numeric(non_cr['Duration (minutes)'], errors='coerce')
-        # Cap at 120 minutes per break
-        non_cr.loc[non_cr['Duration (minutes)'] > 120, 'Duration (minutes)'] = 120
-        total_time = non_cr['Duration (minutes)'].sum()
+        # Exclude breaks over 120 minutes (orphaned/forgotten breaks)
+        non_cr = non_cr[non_cr['Duration (minutes)'] <= 120]
+        total_time = non_cr['Duration (minutes)'].sum() if not non_cr.empty else 0
     else:
         total_time = 0
 
@@ -222,11 +222,11 @@ def get_break_distribution_today() -> List[BreakDistribution]:
     if back_df.empty:
         return []
 
-    # Cap duration at 120 minutes
+    # Exclude breaks over 120 minutes (orphaned/forgotten breaks)
     if 'Duration (minutes)' in back_df.columns:
         back_df = back_df.copy()
         back_df['Duration (minutes)'] = pd.to_numeric(back_df['Duration (minutes)'], errors='coerce')
-        back_df.loc[back_df['Duration (minutes)'] > 120, 'Duration (minutes)'] = 120
+        back_df = back_df[back_df['Duration (minutes)'] <= 120]
 
     # Group by break type
     grouped = back_df.groupby('Break Type').agg({
@@ -283,11 +283,11 @@ def get_agent_performance_today() -> List[AgentPerformance]:
     if 'Reason' in non_cr.columns:
         non_cr = non_cr[~non_cr['Reason'].fillna('').str.contains('Auto-closed|force-closed|System', case=False, na=False)]
 
-    # Also cap duration at 120 minutes (anything over is likely an error or forgotten break)
+    # Exclude breaks over 120 minutes (orphaned/forgotten breaks, not real break times)
     if 'Duration (minutes)' in non_cr.columns:
         non_cr = non_cr.copy()
         non_cr['Duration (minutes)'] = pd.to_numeric(non_cr['Duration (minutes)'], errors='coerce')
-        non_cr.loc[non_cr['Duration (minutes)'] > 120, 'Duration (minutes)'] = 120
+        non_cr = non_cr[non_cr['Duration (minutes)'] <= 120]
 
     if non_cr.empty:
         # Return agents with 0 valid breaks
