@@ -168,16 +168,30 @@ def get_realtime_metrics() -> RealtimeMetrics:
     if df.empty:
         return RealtimeMetrics(timestamp=get_ph_now().strftime('%Y-%m-%d %H:%M:%S'))
 
-    # Completed breaks (BACK actions)
-    completed = len(df[df['Action'] == 'BACK'])
+    # Completed breaks (BACK actions, excluding auto-closed)
+    back_df = df[df['Action'] == 'BACK'].copy()
+
+    # Exclude system-closed breaks from completed count
+    valid_backs = back_df.copy()
+    if 'Reason' in valid_backs.columns:
+        valid_backs = valid_backs[~valid_backs['Reason'].fillna('').str.contains('Auto-closed|force-closed|System', case=False, na=False)]
+
+    completed = len(valid_backs)
 
     # Active agents
     agents = df['User ID'].nunique()
 
-    # Total break time (excluding CR)
-    back_df = df[df['Action'] == 'BACK'].copy()
-    non_cr = back_df[~back_df['Break Type'].str.contains('Comfort Room', case=False, na=False)]
-    total_time = non_cr['Duration (minutes)'].sum() if 'Duration (minutes)' in non_cr.columns else 0
+    # Total break time (excluding CR and auto-closed, capped at 120min)
+    non_cr = valid_backs[~valid_backs['Break Type'].str.contains('Comfort Room', case=False, na=False)]
+
+    if 'Duration (minutes)' in non_cr.columns and not non_cr.empty:
+        non_cr = non_cr.copy()
+        non_cr['Duration (minutes)'] = pd.to_numeric(non_cr['Duration (minutes)'], errors='coerce')
+        # Cap at 120 minutes per break
+        non_cr.loc[non_cr['Duration (minutes)'] > 120, 'Duration (minutes)'] = 120
+        total_time = non_cr['Duration (minutes)'].sum()
+    else:
+        total_time = 0
 
     return RealtimeMetrics(
         active_breaks=0,  # Would need session tracking
@@ -200,6 +214,19 @@ def get_break_distribution_today() -> List[BreakDistribution]:
 
     if back_df.empty:
         return []
+
+    # Exclude system-closed breaks
+    if 'Reason' in back_df.columns:
+        back_df = back_df[~back_df['Reason'].fillna('').str.contains('Auto-closed|force-closed|System', case=False, na=False)]
+
+    if back_df.empty:
+        return []
+
+    # Cap duration at 120 minutes
+    if 'Duration (minutes)' in back_df.columns:
+        back_df = back_df.copy()
+        back_df['Duration (minutes)'] = pd.to_numeric(back_df['Duration (minutes)'], errors='coerce')
+        back_df.loc[back_df['Duration (minutes)'] > 120, 'Duration (minutes)'] = 120
 
     # Group by break type
     grouped = back_df.groupby('Break Type').agg({
@@ -247,8 +274,35 @@ def get_agent_performance_today() -> List[AgentPerformance]:
             for _, row in agents_df.iterrows()
         ]
 
-    # Filter out CR breaks for duration calculation
+    # Filter out:
+    # 1. CR breaks (Comfort Room)
+    # 2. Auto-closed breaks (system-generated with unrealistic durations)
     non_cr = back_df[~back_df['Break Type'].str.contains('Comfort Room', case=False, na=False)]
+
+    # Exclude system-closed breaks (auto-closed by system or force-closed)
+    if 'Reason' in non_cr.columns:
+        non_cr = non_cr[~non_cr['Reason'].fillna('').str.contains('Auto-closed|force-closed|System', case=False, na=False)]
+
+    # Also cap duration at 120 minutes (anything over is likely an error or forgotten break)
+    if 'Duration (minutes)' in non_cr.columns:
+        non_cr = non_cr.copy()
+        non_cr['Duration (minutes)'] = pd.to_numeric(non_cr['Duration (minutes)'], errors='coerce')
+        non_cr.loc[non_cr['Duration (minutes)'] > 120, 'Duration (minutes)'] = 120
+
+    if non_cr.empty:
+        # Return agents with 0 valid breaks
+        agents_df = df[['User ID', 'Full Name']].drop_duplicates()
+        return [
+            AgentPerformance(
+                user_id=int(row['User ID']),
+                full_name=row['Full Name'],
+                total_breaks=0,
+                total_duration=0,
+                avg_duration=0,
+                status='available'
+            )
+            for _, row in agents_df.iterrows()
+        ]
 
     grouped = non_cr.groupby(['User ID', 'Full Name']).agg({
         'Break Type': 'count',
